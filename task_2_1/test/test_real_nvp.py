@@ -1,5 +1,5 @@
 import unittest
-from real_nvp import AffineCouplingLayer, LastChannelSplit
+from task_2_1.real_nvp import AffineCouplingLayer, LastChannelSplit
 import tensorflow as tf
 import numpy as np
 

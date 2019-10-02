@@ -5,8 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from coolname import generate_slug
 from sklearn.model_selection import train_test_split
-from real_nvp import AffineCouplingLayer, SigmoidFlow, LastChannelSplit
-from glow import ActNorm
+from task_2_1.real_nvp import AffineCouplingLayer, SigmoidFlow, LastChannelSplit
+from task_2_1.glow import ActNorm
 
 tfd = tfp.distributions
 tfpl = tfp.layers
