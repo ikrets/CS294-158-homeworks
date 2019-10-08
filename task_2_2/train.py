@@ -59,7 +59,7 @@ val_X = tf.data.Dataset.from_tensor_slices(data['test']) \
 
 val_steps_per_epoch = math.ceil(len(data['test']) / batch_size)
 
-chain = default_chain(shape=shape, filters=128, blocks=4)
+chain = default_chain(shape=shape, filters=256, blocks=6)
 transformed_distribution = tfd.TransformedDistribution(
     event_shape=[tf.reduce_prod(shape)],
     distribution=tfd.Normal(loc=0.0, scale=1.0),
@@ -88,11 +88,18 @@ def sample(rows, columns):
 
     return samples, mean_log_prob
 
-
 @tf.function
-def compute_loss(batch):
+def compute_and_minimize_loss(batch, minimize=True):
     var_count = tf.cast(tf.reduce_prod(batch.shape[1:]), tf.float32)
-    return -tf.reduce_mean(transformed_distribution.log_prob(batch)) + var_count * tf.math.log((2 ** n_bits) / .95)
+
+    with tf.GradientTape() as tape:
+        loss = -tf.reduce_mean(transformed_distribution.log_prob(batch)) + var_count * tf.math.log((2 ** n_bits) / .95)
+
+    if minimize:
+        grads = tape.gradient(loss, chain.trainable_variables)
+        optimizer.apply_gradients(zip(grads, chain.trainable_variables))
+
+    return loss
 
 
 @tf.function
@@ -102,8 +109,6 @@ def bits_dim(loss):
 
 step = tf.Variable(0, trainable=False, dtype=tf.int64)
 tf.summary.experimental.set_step(step)
-plot_samples_freq = 25
-full_validate_freq = 5000
 
 if args.restore:
     with open(args.restore, 'rb') as fp:
@@ -121,11 +126,7 @@ try:
 
             tf.summary.scalar('lr', learning_rate)
 
-            with tf.GradientTape() as tape:
-                loss = compute_loss(batch)
-
-            grads = tape.gradient(loss, chain.trainable_variables)
-            optimizer.apply_gradients(zip(grads, chain.trainable_variables))
+            loss = compute_and_minimize_loss(batch, minimize=True)
 
             tf.summary.scalar('loss', loss)
             tf.summary.scalar('bits/dim', bits_dim(loss))
@@ -140,7 +141,7 @@ try:
                     losses = []
                     bits_dims = []
                     for i, batch in enumerate(val_X):
-                        losses.append(compute_loss(batch))
+                        losses.append(compute_and_minimize_loss(batch, minimize=False))
                         bits_dims.append(bits_dim(losses[-1]))
 
                         if i == val_steps_per_epoch - 1:
