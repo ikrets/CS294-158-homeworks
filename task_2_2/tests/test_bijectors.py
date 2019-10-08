@@ -31,3 +31,10 @@ class TestSplits(unittest.TestCase):
         chain = tfp.bijectors.Chain([CheckerboardSplit(), tfp.bijectors.Invert(CheckerboardSplit())])
         np.testing.assert_array_equal(chain(img), img)
         np.testing.assert_array_equal(chain.inverse_log_det_jacobian(img, event_ndims=4), [0., 0.])
+
+
+    def test_squeeze(self):
+        img = np.random.randn(10, 32, 32, 3)
+        squeeze_and_back = Squeeze()
+        squeeze_and_back = tfb.Invert(Squeeze())(squeeze_and_back)
+        np.testing.assert_array_equal(img, squeeze_and_back(img))

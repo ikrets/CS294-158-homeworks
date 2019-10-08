@@ -132,19 +132,22 @@ class ActNorm(tfb.Bijector):
             per_channel_mean = tf.reduce_mean(x, axis=tf.range(x.shape.rank - 1))
             per_channel_std = tf.math.reduce_std(x - per_channel_mean[tf.newaxis, :], axis=tf.range(x.shape.rank - 1))
 
-            self.b.assign(-per_channel_mean / per_channel_std)
+            self.b.assign(-per_channel_mean)
             self.s.assign(1. / per_channel_std)
 
     def _forward(self, x):
         self._init(x)
 
-        activation = self.s * x + self.b
-        tf.summary.histogram(f'activations', activation)
+        activation = self.s * (x + self.b)
+
+        tf.summary.histogram('activations', activation)
+        tf.summary.histogram('variables/s', self.s.value())
+        tf.summary.histogram('variables/b', self.b.value())
 
         return activation
 
     def _inverse(self, y):
-        return (y - self.b) / self.s
+        return y / self.s - self.b
 
     def _forward_log_det_jacobian(self, x):
         # forward seems to be always called first, but just to be sure
@@ -177,7 +180,7 @@ class Squeeze(tfb.Bijector):
 
     def _inverse(self, y):
         orig_y_shape = y.shape
-        y = tf.reshape(y, [y.shape[0], y.shape[1], 2, y.shape[2], 2, y.shape[3] // 4])
+        y = tf.reshape(y, [y.shape[0], y.shape[1], y.shape[2], 2, 2, y.shape[3] // 4])
         y = tf.transpose(y, [0, 1, 3, 2, 4, 5])
         y = tf.reshape(y, [orig_y_shape[0], orig_y_shape[1] * 2, orig_y_shape[2] * 2, orig_y_shape[3] // 4])
 
