@@ -16,6 +16,7 @@ parser.add_argument('--warmup_steps', type=int, help='number of update steps to 
 parser.add_argument('--plot_samples_freq', type=int, help='the frequency of plotting samples in steps')
 parser.add_argument('--validate_freq', type=int, help='the frequency of calculating loss on the whole validation '
                                                       'set in steps')
+parser.add_argument('--fp16', action='store_true', help='use automated mixed precision')
 args = parser.parse_args()
 
 tfk = tf.keras
@@ -72,7 +73,8 @@ val_writer = tf.summary.create_file_writer(f'logs/{slug}/val')
 
 learning_rate = tf.Variable(args.learning_rate, trainable=False)
 optimizer = tf.optimizers.Adam(learning_rate)
-optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer)
+if args.use_fp16:
+    optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer)
 
 
 @tf.function
