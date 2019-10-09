@@ -5,17 +5,22 @@ import math
 import argparse
 import os
 import traceback
+from contextlib import nullcontext
 from coolname import generate_slug
 from task_2_2.chains import default_chain
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--restore', type=str, help='restore weights from the checkpoint')
-parser.add_argument('--learning_rate', type=float)
+parser.add_argument('--learning_rate', type=float, required=True)
 parser.add_argument('--warmup_steps', type=int, help='number of update steps to increase learning rate from 0 '
-                                                     'to target learning rate')
+                                                     'to target learning rate', default=0)
 parser.add_argument('--plot_samples_freq', type=int, help='the frequency of plotting samples in steps')
 parser.add_argument('--validate_freq', type=int, help='the frequency of calculating loss on the whole validation '
-                                                      'set in steps')
+                                                      'set in steps',
+                    default=1000)
+parser.add_argument('--save_freq', type=int, help='the frequency of saving weights in steps', default=500)
+parser.add_argument('--log_histograms', action='store_true', help='log histograms of activations and '
+                                                                  'some parameters every training step')
 parser.add_argument('--fp16', action='store_true', help='use automated mixed precision')
 args = parser.parse_args()
 
@@ -54,9 +59,9 @@ shape = [32, 32, 3]
 n_bits = 2.
 
 train_X = tf.data.Dataset.from_tensor_slices(data['train']) \
-    .map(lambda X: preprocess(X, n_bits), num_parallel_calls=8).shuffle(1000).batch(batch_size).repeat().prefetch(1)
+    .map(lambda X: preprocess(X, n_bits), num_parallel_calls=8).shuffle(1000).repeat().batch(batch_size).prefetch(1)
 val_X = tf.data.Dataset.from_tensor_slices(data['test']) \
-    .map(lambda X: preprocess(X, n_bits), num_parallel_calls=8).batch(batch_size).repeat().prefetch(1)
+    .map(lambda X: preprocess(X, n_bits), num_parallel_calls=8).repeat().batch(batch_size).prefetch(1)
 
 val_steps_per_epoch = math.ceil(len(data['test']) / batch_size)
 
@@ -73,25 +78,25 @@ val_writer = tf.summary.create_file_writer(f'logs/{slug}/val')
 
 learning_rate = tf.Variable(args.learning_rate, trainable=False)
 optimizer = tf.optimizers.Adam(learning_rate)
-if args.use_fp16:
+if args.fp16:
     optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer)
 
 
 @tf.function
 def sample(rows, columns):
     samples = transformed_distribution.sample(rows * columns)
-    mean_log_prob = tf.reduce_mean(transformed_distribution.log_prob(samples))
-
     samples = postprocess(samples, n_bits)
     samples = samples[:, :, :, ::-1]
     samples = tf.reshape(samples, (rows, columns, *shape))
     samples = tf.transpose(samples, (0, 2, 1, 3, 4))
     samples = tf.reshape(samples, (1, shape[0] * rows, shape[1] * columns, shape[2]))
 
-    return samples, mean_log_prob
+    return samples
+
 
 @tf.function
-def compute_and_minimize_loss(batch, minimize=True):
+def compute_and_minimize_loss(batch, minimize):
+    print('Tracing compute and minimize loss')
     var_count = tf.cast(tf.reduce_prod(batch.shape[1:]), tf.float32)
 
     with tf.GradientTape() as tape:
@@ -119,47 +124,45 @@ if args.restore:
         for v in transformed_distribution.trainable_variables:
             v.assign(weights[v.name])
 
-try:
+train_context = train_writer.as_default() if args.log_histograms else nullcontext()
+
+for batch in train_X:
+    if step < args.warmup_steps:
+        learning_rate.assign(
+            args.learning_rate * tf.cast(step + 1, tf.float32) / tf.cast(args.warmup_steps, tf.float32))
+
+    with train_context:
+        loss = compute_and_minimize_loss(batch, minimize=True)
+
     with train_writer.as_default():
-        for batch in train_X:
-            if step < args.warmup_steps:
-                learning_rate.assign(
-                    args.learning_rate * tf.cast(step + 1, tf.float32) / tf.cast(args.warmup_steps, tf.float32))
+        tf.summary.scalar('lr', learning_rate)
+        tf.summary.scalar('loss', loss)
+        tf.summary.scalar('bits/dim', bits_dim(loss))
 
-            tf.summary.scalar('lr', learning_rate)
+        if args.plot_samples_freq and step.numpy() % args.plot_samples_freq == 0:
+            samples = sample(rows=4, columns=10)
+            tf.summary.image('samples', samples)
 
-            loss = compute_and_minimize_loss(batch, minimize=True)
+    if step.numpy() % args.validate_freq == 0:
+        losses = []
+        bits_dims = []
+        for i, batch in enumerate(val_X):
+            losses.append(compute_and_minimize_loss(batch, minimize=False))
+            bits_dims.append(bits_dim(losses[-1]))
 
-            tf.summary.scalar('loss', loss)
-            tf.summary.scalar('bits/dim', bits_dim(loss))
+            if i == val_steps_per_epoch - 1:
+                break
 
-            if step.numpy() % args.plot_samples_freq == 0:
-                samples, mean_log_prob = sample(rows=4, columns=10)
-                tf.summary.image('samples', samples)
-                tf.summary.scalar('samples_mean_log_prob', mean_log_prob)
+        with val_writer.as_default():
+            tf.summary.scalar('loss', tf.reduce_mean(losses))
+            tf.summary.scalar('bits/dim', tf.reduce_mean(bits_dims))
 
-            if step.numpy() % args.validate_freq == 0:
-                with val_writer.as_default():
-                    losses = []
-                    bits_dims = []
-                    for i, batch in enumerate(val_X):
-                        losses.append(compute_and_minimize_loss(batch, minimize=False))
-                        bits_dims.append(bits_dim(losses[-1]))
+    if step.numpy() % args.save_freq == 0 and step.numpy():
+        variables = {}
+        for v in transformed_distribution.trainable_variables:
+            variables[v.name] = v.value().numpy()
 
-                        if i == val_steps_per_epoch - 1:
-                            break
-                    tf.summary.scalar('loss', tf.reduce_mean(losses))
-                    tf.summary.scalar('bits/dim', tf.reduce_mean(bits_dims))
+        with open('logs/{}/weights_{:05d}.pickle'.format(slug, step.numpy()), 'wb') as fp:
+            pickle.dump(variables, fp)
 
-            step.assign(step + 1)
-except KeyboardInterrupt:
-    traceback.print_exc()
-
-    print('Saving trainable variables...')
-    variables = {}
-    for v in transformed_distribution.trainable_variables:
-        variables[v.name] = v.value().numpy()
-
-    os.makedirs('weights', exist_ok=True)
-    with open(f'weights/{slug}.pickle', 'wb') as fp:
-        pickle.dump(variables, fp)
+    step.assign(step + 1)
