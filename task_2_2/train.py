@@ -7,7 +7,7 @@ import os
 import traceback
 from contextlib import nullcontext
 from coolname import generate_slug
-from task_2_2.chains import default_chain
+from task_2_2.chains import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--restore', type=str, help='restore weights from the checkpoint')
@@ -22,6 +22,14 @@ parser.add_argument('--save_freq', type=int, help='the frequency of saving weigh
 parser.add_argument('--log_histograms', action='store_true', help='log histograms of activations and '
                                                                   'some parameters every training step')
 parser.add_argument('--fp16', action='store_true', help='use automated mixed precision')
+parser.add_argument('--chain', choices=['real_nvp', 'multiscale_real_nvp'], help='the type of the Flow model',
+                    required=True)
+parser.add_argument('--filters', type=int,
+                    help='the number of filters in each convolution of affine coupling shift and scale mapping',
+                    default=256)
+parser.add_argument('--blocks', type=int, help='the number of resnet blocks in affine coupling shift and scale mapping',
+                    default=6)
+parser.add_argument('--batch_size', type=int, default=64)
 args = parser.parse_args()
 
 tfk = tf.keras
@@ -29,6 +37,11 @@ tfkl = tf.keras.layers
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
+
+chains = {
+    'real_nvp': real_nvp,
+    'multiscale_real_nvp': multiscale_real_nvp
+}
 
 with open('hw2_q2.pkl', 'rb') as fp:
     data = pickle.load(fp)
@@ -65,7 +78,7 @@ val_X = tf.data.Dataset.from_tensor_slices(data['test']) \
 
 val_steps_per_epoch = math.ceil(len(data['test']) / batch_size)
 
-chain = default_chain(shape=shape, filters=256, blocks=6)
+chain = chains[args.chain](shape=shape, filters=args.filters, blocks=args.blocks)
 transformed_distribution = tfd.TransformedDistribution(
     event_shape=[tf.reduce_prod(shape)],
     distribution=tfd.Normal(loc=0.0, scale=1.0),
