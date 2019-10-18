@@ -76,14 +76,14 @@ def real_nvp(shape, filters, blocks):
     return tfb.Chain(chain, name='real_nvp')
 
 
-def multiscale_real_nvp(shape, filters, blocks):
+def multiscale_real_nvp(shape, steps_per_scale, filters, blocks):
     checkerboard = CheckerboardSplit()
     squeeze = Squeeze()
 
     scale_activation_function = lambda x: tf.maximum(tf.sigmoid(x), 1e-6)
 
     current_shape = shape
-    L = np.log2(shape[0] // 4).astype(int)
+    L = np.log2(shape[0] // 4).astype(int) + 1
     factored_out = 0
 
     chain = []
@@ -95,32 +95,35 @@ def multiscale_real_nvp(shape, filters, blocks):
             scale_chain.append(tfb.Reshape([current_shape[2], current_shape[0], current_shape[1]]))
             scale_chain.append(tfb.Transpose([1, 2, 0]))
 
-        scale_chain.append(Squeeze())
-        current_shape = squeeze.forward_event_shape(current_shape)
-
         scale_chain.append(CheckerboardSplit())
         checkerboard_channels = checkerboard.forward_event_shape(current_shape)[-1]
 
-        for i in range(3):
+        for i in range(3 if level != L - 1 else 4):
             scale_chain.append(
-                ActNorm(num_channels=checkerboard_channels, name=f'level_{level}/checkerboard/act_norm_{i}'))
+                ActNorm(num_channels=checkerboard_channels,
+                        name=f'level_{level}/checkerboard_{i}/act_norm_{i}'))
             scale_chain.append(AffineCoupling(scale_activation_function=scale_activation_function,
                                               shift_scale=simple_resnet(filters, blocks,
                                                                         channels=checkerboard_channels // 2,
-                                                                        name=f'level_{level}/checkerboard/shift_scale_{i}')))
+                                                                        name=f'level_{level}/checkerboard_{i}/shift_scale_{i}')))
             scale_chain.append(tfb.Permute(permutation=tuple_flip_permutation(num_channels=checkerboard_channels)))
         scale_chain.append(tfb.Invert(CheckerboardSplit()))
 
-        for i in range(3):
-            scale_chain.append(ActNorm(num_channels=current_shape[-1], name=f'level_{level}/channel/act_norm_{i}'))
-            scale_chain.append(AffineCoupling(scale_activation_function=scale_activation_function,
-                                              shift_scale=simple_resnet(filters, blocks,
-                                                                        channels=current_shape[-1] // 2,
-                                                                        name=f'level_{level}/channel/shift_scale_{i}')))
-            scale_chain.append(tfb.Permute(permutation=tuple_flip_permutation(num_channels=current_shape[-1])))
+        if level != L - 1:
+            scale_chain.append(Squeeze())
+            current_shape = squeeze.forward_event_shape(current_shape)
+            filters *= 2
+
+            for i in range(3):
+                scale_chain.append(
+                    ActNorm(num_channels=current_shape[-1], name=f'level_{level}/channel_{i}/act_norm_{i}'))
+                scale_chain.append(AffineCoupling(scale_activation_function=scale_activation_function,
+                                                  shift_scale=simple_resnet(filters, blocks,
+                                                                            channels=current_shape[-1] // 2,
+                                                                            name=f'level_{level}/channel_{i}/shift_scale_{i}')))
+                scale_chain.append(tfb.Permute(permutation=tuple_flip_permutation(num_channels=current_shape[-1])))
 
         total_dimensions = current_shape[0] * current_shape[1] * current_shape[2]
-
         scale_chain.append(ActNorm(num_channels=current_shape[-1], name=f'level_{level}/final_act_norm'))
         scale_chain.append(tfb.Transpose([2, 0, 1]))
         scale_chain.append(tfb.Reshape(event_shape_in=[current_shape[2], current_shape[0], current_shape[1]],

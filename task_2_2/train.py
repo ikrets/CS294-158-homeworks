@@ -1,19 +1,19 @@
 import tensorflow as tf
-import tensorflow_probability as tfp
 import pickle
 import math
 import argparse
-import os
-import traceback
-from contextlib import nullcontext
+import json
 from coolname import generate_slug
 from task_2_2.chains import *
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--dataset', type=str)
 parser.add_argument('--restore', type=str, help='restore weights from the checkpoint')
 parser.add_argument('--learning_rate', type=float, required=True)
 parser.add_argument('--warmup_steps', type=int, help='number of update steps to increase learning rate from 0 '
                                                      'to target learning rate', default=0)
+parser.add_argument('--anneal_steps', type=int, default=0)
+parser.add_argument('--total_steps', type=int, required=True)
 parser.add_argument('--plot_samples_freq', type=int, help='the frequency of plotting samples in steps')
 parser.add_argument('--validate_freq', type=int, help='the frequency of calculating loss on the whole validation '
                                                       'set in steps',
@@ -29,6 +29,7 @@ parser.add_argument('--filters', type=int,
                     default=256)
 parser.add_argument('--blocks', type=int, help='the number of resnet blocks in affine coupling shift and scale mapping',
                     default=6)
+parser.add_argument('--steps_per_scale', type=int, help='')
 parser.add_argument('--batch_size', type=int, default=64)
 args = parser.parse_args()
 
@@ -38,12 +39,7 @@ tfkl = tf.keras.layers
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
-chains = {
-    'real_nvp': real_nvp,
-    'multiscale_real_nvp': multiscale_real_nvp
-}
-
-with open('hw2_q2.pkl', 'rb') as fp:
+with open(args.dataset, 'rb') as fp:
     data = pickle.load(fp)
 
 
@@ -78,16 +74,26 @@ val_X = tf.data.Dataset.from_tensor_slices(data['test']) \
 
 val_steps_per_epoch = math.ceil(len(data['test']) / batch_size)
 
-chain = chains[args.chain](shape=shape, filters=args.filters, blocks=args.blocks)
-transformed_distribution = tfd.TransformedDistribution(
-    event_shape=[tf.reduce_prod(shape)],
-    distribution=tfd.Normal(loc=0.0, scale=1.0),
-    bijector=tfb.Invert(chain)
-)
+make_chain = {
+    'real_nvp': lambda: real_nvp(shape, filters=args.filters, blocks=args.blocks),
+    'multiscale_real_nvp': lambda: multiscale_real_nvp(shape, steps_per_scale=args.steps_per_scale,
+                                                       filters=args.filters,
+                                                       blocks=args.blocks)
+}
+
+with tf.device('GPU:0'):
+    chain = make_chain[args.chain]()
+    transformed_distribution = tfd.TransformedDistribution(
+        event_shape=[tf.reduce_prod(shape)],
+        distribution=tfd.Normal(loc=0.0, scale=1.0),
+        bijector=tfb.Invert(chain)
+    )
 
 slug = generate_slug()
 train_writer = tf.summary.create_file_writer(f'logs/{slug}/train')
 val_writer = tf.summary.create_file_writer(f'logs/{slug}/val')
+with open(f'logs/{slug}/args.json', 'w') as fp:
+    json.dump(vars(args), fp, indent=4)
 
 learning_rate = tf.Variable(args.learning_rate, trainable=False)
 optimizer = tf.optimizers.Adam(learning_rate)
@@ -109,9 +115,7 @@ def sample(rows, columns):
 
 @tf.function
 def compute_and_minimize_loss(batch, minimize):
-    print('Tracing compute and minimize loss')
     var_count = tf.cast(tf.reduce_prod(batch.shape[1:]), tf.float32)
-
     with tf.GradientTape() as tape:
         loss = -tf.reduce_mean(transformed_distribution.log_prob(batch)) + var_count * tf.math.log((2 ** n_bits) / .95)
 
@@ -137,14 +141,20 @@ if args.restore:
         for v in transformed_distribution.trainable_variables:
             v.assign(weights[v.name])
 
-train_context = train_writer.as_default() if args.log_histograms else nullcontext()
-
 for batch in train_X:
     if step < args.warmup_steps:
         learning_rate.assign(
             args.learning_rate * tf.cast(step + 1, tf.float32) / tf.cast(args.warmup_steps, tf.float32))
+    elif step > args.total_steps - args.anneal_steps and step < args.total_steps:
+        anneal_step = step - args.total_steps + args.anneal_steps
+        learning_rate.assign(tf.cast((1 - anneal_step / args.anneal_steps) * args.learning_rate, dtype=tf.float32))
+    elif step == args.total_steps:
+        break
 
-    with train_context:
+    if args.log_histograms:
+        with train_writer.as_default():
+            loss = compute_and_minimize_loss(batch, minimize=True)
+    else:
         loss = compute_and_minimize_loss(batch, minimize=True)
 
     with train_writer.as_default():
@@ -179,3 +189,10 @@ for batch in train_X:
             pickle.dump(variables, fp)
 
     step.assign(step + 1)
+
+variables = {}
+for v in transformed_distribution.trainable_variables:
+    variables[v.name] = v.value().numpy()
+
+with open('logs/{}/weights_{:05d}.pickle'.format(slug, step.numpy()), 'wb') as fp:
+    pickle.dump(variables, fp)
