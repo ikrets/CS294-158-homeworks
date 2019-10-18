@@ -22,7 +22,8 @@ parser.add_argument('--save_freq', type=int, help='the frequency of saving weigh
 parser.add_argument('--log_histograms', action='store_true', help='log histograms of activations and '
                                                                   'some parameters every training step')
 parser.add_argument('--fp16', action='store_true', help='use automated mixed precision')
-parser.add_argument('--chain', choices=['real_nvp', 'multiscale_real_nvp'], help='the type of the Flow model',
+parser.add_argument('--chain', choices=['real_nvp', 'multiscale_real_nvp', 'multiscale_glow'],
+                    help='the type of the Flow model',
                     required=True)
 parser.add_argument('--filters', type=int,
                     help='the number of filters in each convolution of affine coupling shift and scale mapping',
@@ -76,9 +77,10 @@ val_steps_per_epoch = math.ceil(len(data['test']) / batch_size)
 
 make_chain = {
     'real_nvp': lambda: real_nvp(shape, filters=args.filters, blocks=args.blocks),
-    'multiscale_real_nvp': lambda: multiscale_real_nvp(shape, steps_per_scale=args.steps_per_scale,
+    'multiscale_real_nvp': lambda: multiscale_real_nvp(shape,
                                                        filters=args.filters,
-                                                       blocks=args.blocks)
+                                                       blocks=args.blocks),
+    'multiscale_glow': lambda: multiscale_glow(shape, steps_per_scale=args.steps_per_scale, filters=args.filters)
 }
 
 with tf.device('GPU:0'):

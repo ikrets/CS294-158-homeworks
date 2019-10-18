@@ -3,6 +3,7 @@ import tensorflow as tf
 tfk = tf.keras
 tfkl = tf.keras.layers
 
+
 def simple_resnet(filters, blocks, channels, name='simple_resnet'):
     input = tfkl.Input(shape=[None, None, channels])
     net = tfkl.Conv2D(filters=filters, kernel_size=3, padding='same', use_bias=False, name=f'{name}/initial_conv')(
@@ -30,4 +31,15 @@ def simple_resnet(filters, blocks, channels, name='simple_resnet'):
     net = tfkl.Conv2D(filters=channels * 2, kernel_size=3, padding='same', name=f'{name}/final_conv')(net)
     net = tfkl.Lambda(lambda X: tf.split(X, 2, axis=-1))(net)
 
-    return tfk.Model(inputs=input, outputs=net)
+    return tfk.Model(inputs=input, outputs=net, name=name)
+
+
+def glow_block(filters, channels, name='glow_block'):
+    input = tfkl.Input(shape=[None, None, channels])
+    net = tfkl.Conv2D(filters=filters, kernel_size=3, padding='same', activation='relu')(input)
+    net = tfkl.Conv2D(filters=filters, kernel_size=1, activation='relu')(net)
+    net = tfkl.Conv2D(filters=channels * 2, kernel_size=3, padding='same', activation=None,
+                    kernel_initializer=tfk.initializers.zeros())(net)
+    net = tfkl.Lambda(lambda X: tf.split(X, 2, axis=-1))(net)
+
+    return tfk.Model(inputs=input, outputs=net, name=name)

@@ -2,6 +2,8 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 tfb = tfp.bijectors
+tfk = tf.keras
+tfkl = tf.keras.layers
 
 
 class CheckerboardSplit(tfb.Bijector):
@@ -197,15 +199,28 @@ class Squeeze(tfb.Bijector):
 
 
 class InvertibleConvolution(tfb.Bijector):
-    def __init__(self, validate_args=False, name='inverible_convolution'):
+    def __init__(self, num_channels, validate_args=False, name='inverible_convolution'):
         super(InvertibleConvolution, self).__init__(validate_args=validate_args,
                                                     name=name,
                                                     forward_min_event_ndims=3,
                                                     inverse_min_event_ndims=3,
                                                     is_constant_jacobian=False)
 
-    def _init(self, x):
-        pass
+        Z = tf.random.normal([num_channels, num_channels])
+        Q, _ = tf.linalg.qr(Z)
+
+        self.W = tf.Variable(Q[tf.newaxis, tf.newaxis, ...], trainable=True)
 
     def _forward(self, x):
-        pass
+        return tf.nn.conv2d(x, filters=self.W, strides=1, padding='VALID')
+
+    def _inverse(self, y):
+        return tf.nn.conv2d(y, filters=tf.linalg.inv(self.W), strides=1, padding='VALID')
+
+    def _forward_log_det_jacobian(self, x):
+        _, logdet = tf.linalg.slogdet(self.W[0, 0])
+        return x.shape[1] * x.shape[2] * logdet
+
+    def _inverse_log_det_jacobian(self, y):
+        _, logdet = tf.linalg.slogdet(tf.linalg.inv(self.W[0, 0]))
+        return y.shape[1] * y.shape[2] * logdet

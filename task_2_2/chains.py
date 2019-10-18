@@ -1,8 +1,9 @@
 import tensorflow as tf
 import numpy as np
 import tensorflow_probability as tfp
-from task_2_2.bijectors import CheckerboardSplit, AffineCoupling, tuple_flip_permutation, ActNorm, Squeeze
-from task_2_2.transformations import simple_resnet
+from task_2_2.bijectors import CheckerboardSplit, AffineCoupling, tuple_flip_permutation, ActNorm, Squeeze, \
+    InvertibleConvolution
+from task_2_2.transformations import simple_resnet, glow_block
 
 tfb = tfp.bijectors
 
@@ -76,7 +77,7 @@ def real_nvp(shape, filters, blocks):
     return tfb.Chain(chain, name='real_nvp')
 
 
-def multiscale_real_nvp(shape, steps_per_scale, filters, blocks):
+def multiscale_real_nvp(shape, filters, blocks):
     checkerboard = CheckerboardSplit()
     squeeze = Squeeze()
 
@@ -145,3 +146,55 @@ def multiscale_real_nvp(shape, steps_per_scale, filters, blocks):
 
     chain.reverse()
     return tfb.Chain(chain, name='multiscale_real_nvp')
+
+
+def multiscale_glow(shape, steps_per_scale, filters):
+    scale_activation_function = lambda x: tf.sigmoid(x + 2.)
+    squeeze = Squeeze()
+
+    current_shape = shape
+    L = np.log2(shape[0] // 4).astype(int)
+    factored_out = 0
+
+    chain = []
+
+    for level in range(L):
+        scale_chain = []
+
+        if level:
+            scale_chain.append(tfb.Reshape([current_shape[2], current_shape[0], current_shape[1]]))
+            scale_chain.append(tfb.Transpose([1, 2, 0]))
+
+        scale_chain.append(Squeeze())
+        current_shape = squeeze.forward_event_shape(current_shape)
+
+        for step in range(steps_per_scale):
+            scale_chain.append(
+                ActNorm(num_channels=current_shape[-1], name=f'level_{level}/step_{step}/act_norm'))
+            scale_chain.append(InvertibleConvolution(num_channels=current_shape[-1],
+                                                     name=f'level_{level}/step_{step}/invertible_conv'))
+            scale_chain.append(AffineCoupling(scale_activation_function=scale_activation_function,
+                                              shift_scale=glow_block(filters, channels=current_shape[-1] // 2,
+                                                                        name=f'level_{level}/step_{step}/shift_scale')))
+
+        total_dimensions = current_shape[0] * current_shape[1] * current_shape[2]
+        scale_chain.append(tfb.Transpose([2, 0, 1]))
+        scale_chain.append(tfb.Reshape(event_shape_in=[current_shape[2], current_shape[0], current_shape[1]],
+                                       event_shape_out=[total_dimensions]))
+
+        scale_chain.reverse()
+        scale_chain = tfb.Chain(scale_chain, name=f'level_{level}')
+
+        if level:
+            chain.append(tfb.Blockwise(bijectors=[tfb.Identity(), scale_chain],
+                                       block_sizes=[factored_out + (total_dimensions if level != L - 1 else 0),
+                                                    total_dimensions]))
+            factored_out += total_dimensions
+        else:
+            chain.append(scale_chain)
+
+        if level != L - 2:
+            current_shape = [current_shape[0], current_shape[1], current_shape[2] // 2]
+
+    chain.reverse()
+    return tfb.Chain(chain, name='multiscale_glow')
