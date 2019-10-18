@@ -14,7 +14,6 @@ class CheckerboardSplit(tfb.Bijector):
             name=name
         )
 
-
     def _forward(self, x):
         y1_part1 = x[:, ::2, ::2, :]
         y1_part2 = x[:, 1::2, 1::2, :]
@@ -162,6 +161,7 @@ class ActNorm(tfb.Bijector):
         det = tf.cast(area, tf.float32) * tf.reduce_sum(tf.math.log(tf.abs(1 / self.s)))
         return tf.broadcast_to(det, y.shape[0:1])
 
+
 class Squeeze(tfb.Bijector):
     def __init__(self, validate_args=False, name='squeeze'):
         super(Squeeze, self).__init__(validate_args=validate_args,
@@ -194,3 +194,18 @@ class Squeeze(tfb.Bijector):
 
     def _inverse_event_shape(self, output_shape):
         return [output_shape[0] * 2, output_shape[1] * 2, output_shape[2] // 4]
+
+
+class InvertibleConvolution(tfb.Bijector):
+    def __init__(self, validate_args=False, name='inverible_convolution'):
+        super(InvertibleConvolution, self).__init__(validate_args=validate_args,
+                                                    name=name,
+                                                    forward_min_event_ndims=3,
+                                                    inverse_min_event_ndims=3,
+                                                    is_constant_jacobian=False)
+
+    def _init(self, x):
+        pass
+
+    def _forward(self, x):
+        pass

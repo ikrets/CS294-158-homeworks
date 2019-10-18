@@ -1,0 +1,18 @@
+{
+    "dataset": "hw2_q2.pkl",
+    "restore": null,
+    "learning_rate": 0.0005,
+    "warmup_steps": 200,
+    "anneal_steps": 5000,
+    "total_steps": 20000,
+    "plot_samples_freq": 500,
+    "validate_freq": 1000,
+    "save_freq": 1000,
+    "log_histograms": false,
+    "fp16": true,
+    "chain": "multiscale_real_nvp",
+    "filters": 64,
+    "blocks": 6,
+    "steps_per_scale": null,
+    "batch_size": 64
+}

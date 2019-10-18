@@ -3,7 +3,6 @@ import tensorflow as tf
 tfk = tf.keras
 tfkl = tf.keras.layers
 
-
 def simple_resnet(filters, blocks, channels, name='simple_resnet'):
     input = tfkl.Input(shape=[None, None, channels])
     net = tfkl.Conv2D(filters=filters, kernel_size=3, padding='same', use_bias=False, name=f'{name}/initial_conv')(
