@@ -209,7 +209,7 @@ class InvertibleConvolution(tfb.Bijector):
         Z = tf.random.normal([num_channels, num_channels])
         Q, _ = tf.linalg.qr(Z)
 
-        self.W = tf.Variable(Q[tf.newaxis, tf.newaxis, ...], trainable=True)
+        self.W = tf.Variable(Q[tf.newaxis, tf.newaxis, ...], trainable=True, name=f'{self.name}/W')
 
     def _forward(self, x):
         return tf.nn.conv2d(x, filters=self.W, strides=1, padding='VALID')
