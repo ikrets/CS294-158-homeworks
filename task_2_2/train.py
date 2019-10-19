@@ -4,6 +4,7 @@ import math
 import argparse
 import json
 from coolname import generate_slug
+from task_2_2.utils import preprocess, postprocess
 from task_2_2.chains import *
 
 parser = argparse.ArgumentParser()
@@ -44,21 +45,6 @@ with open(args.dataset, 'rb') as fp:
     data = pickle.load(fp)
 
 
-@tf.function
-def preprocess(x, n_bits):
-    x = tf.cast(x, tf.float32)
-    x += tf.random.uniform(x.shape, minval=0, maxval=1.)
-    x = .05 + .95 * x / (2 ** n_bits)
-
-    return x
-
-
-@tf.function
-def postprocess(x, n_bits):
-    x = (x - .05) * (2 ** n_bits) / .95
-    x = tf.cast(x, tf.uint8) * tf.cast(256 / (2 ** n_bits), tf.uint8)
-
-    return x
 
 
 gpu = tf.config.experimental.list_physical_devices('GPU')[0]
