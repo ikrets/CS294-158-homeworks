@@ -36,10 +36,13 @@ def simple_resnet(filters, blocks, channels, name='simple_resnet'):
 
 def glow_block(filters, channels, name='glow_block'):
     input = tfkl.Input(shape=[None, None, channels])
-    net = tfkl.Conv2D(filters=filters, kernel_size=3, padding='same', activation='relu')(input)
-    net = tfkl.Conv2D(filters=filters, kernel_size=1, activation='relu')(net)
+    net = tfkl.Conv2D(filters=filters, kernel_size=3, padding='same', activation='relu',
+                      name=f'{name}/conv_1')(input)
+    net = tfkl.Conv2D(filters=filters, kernel_size=1, activation='relu',
+                      name=f'{name}/conv_2')(net)
     net = tfkl.Conv2D(filters=channels * 2, kernel_size=3, padding='same', activation=None,
-                    kernel_initializer=tfk.initializers.zeros())(net)
+                      name=f'{name}/conv_3',
+                      kernel_initializer=tfk.initializers.zeros())(net)
     net = tfkl.Lambda(lambda X: tf.split(X, 2, axis=-1))(net)
 
     return tfk.Model(inputs=input, outputs=net, name=name)
