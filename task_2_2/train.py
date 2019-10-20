@@ -23,7 +23,8 @@ parser.add_argument('--save_freq', type=int, help='the frequency of saving weigh
 parser.add_argument('--log_histograms', action='store_true', help='log histograms of activations and '
                                                                   'some parameters every training step')
 parser.add_argument('--fp16', action='store_true', help='use automated mixed precision')
-parser.add_argument('--chain', choices=['real_nvp', 'multiscale_real_nvp', 'multiscale_glow'],
+parser.add_argument('--chain', choices=['real_nvp', 'multiscale_real_nvp', 'multiscale_glow',
+                                        'glow_no_factoring'],
                     help='the type of the Flow model',
                     required=True)
 parser.add_argument('--filters', type=int,
@@ -44,9 +45,6 @@ tfb = tfp.bijectors
 with open(args.dataset, 'rb') as fp:
     data = pickle.load(fp)
 
-
-
-
 gpu = tf.config.experimental.list_physical_devices('GPU')[0]
 tf.config.experimental.set_memory_growth(gpu, enable=True)
 
@@ -66,7 +64,8 @@ make_chain = {
     'multiscale_real_nvp': lambda: multiscale_real_nvp(shape,
                                                        filters=args.filters,
                                                        blocks=args.blocks),
-    'multiscale_glow': lambda: multiscale_glow(shape, steps_per_scale=args.steps_per_scale, filters=args.filters)
+    'multiscale_glow': lambda: multiscale_glow(shape, steps_per_scale=args.steps_per_scale, filters=args.filters),
+    'glow_no_factoring': lambda: glow_no_factoring(shape, filters=args.filters, blocks=args.blocks)
 }
 
 with tf.device('GPU:0'):

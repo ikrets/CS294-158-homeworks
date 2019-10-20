@@ -148,6 +148,37 @@ def multiscale_real_nvp(shape, filters, blocks):
     return tfb.Chain(chain, name='multiscale_real_nvp')
 
 
+def glow_no_factoring(shape, filters, blocks):
+    scale_activation_function = lambda x: tf.maximum(tf.math.sigmoid(x), 1e-6)
+    chain = []
+    current_shape = shape
+
+    def step(name, step_i, num_channels):
+        return [
+            ActNorm(num_channels=num_channels, name=f'{name}_act_norm_{step_i}'),
+            InvertibleConvolution(num_channels=num_channels, name=f'{name}_invconv_{step_i}'),
+            AffineCoupling(scale_activation_function=scale_activation_function,
+                           shift_scale=simple_resnet(filters=filters, blocks=blocks,
+                                                     channels=num_channels // 2,
+                                                     name=f'{name}_affine_coupling_shift_scale_{step_i}'))
+        ]
+
+    chain.append(Squeeze())
+    current_shape = chain[-1].forward_event_shape(current_shape)
+    for i in range(10):
+        chain.extend(step('stage_0', step_i=i, num_channels=current_shape[-1]))
+
+    chain.append(Squeeze())
+    current_shape = chain[-1].forward_event_shape(current_shape)
+    for i in range(6):
+        chain.extend(step('stage_1', step_i=i, num_channels=current_shape[-1]))
+
+    chain.append(tfb.Reshape(event_shape_in=current_shape,
+                             event_shape_out=[shape[0] * shape[1] * shape[2]]))
+    chain.reverse()
+    return tfb.Chain(chain, name='glow_no_factoring')
+
+
 def multiscale_glow(shape, steps_per_scale, filters):
     scale_activation_function = lambda x: tf.sigmoid(x + 2.)
     squeeze = Squeeze()
@@ -175,7 +206,7 @@ def multiscale_glow(shape, steps_per_scale, filters):
                                                      name=f'level_{level}/step_{step}/invertible_conv'))
             scale_chain.append(AffineCoupling(scale_activation_function=scale_activation_function,
                                               shift_scale=glow_block(filters, channels=current_shape[-1] // 2,
-                                                                        name=f'level_{level}/step_{step}/shift_scale')))
+                                                                     name=f'level_{level}/step_{step}/shift_scale')))
 
         total_dimensions = current_shape[0] * current_shape[1] * current_shape[2]
         scale_chain.append(tfb.Transpose([2, 0, 1]))
