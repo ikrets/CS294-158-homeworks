@@ -32,6 +32,8 @@ high density. Throughout all my trials I've never observed a clean separation be
 the flow from the task 1.1.
 
 #### Task 2
+![Samples from multiscale Glow with T=0.7](images/glow_samples.png)
+
 Some useful resources that I read while implementing this task:
 - https://github.com/MokkeMeguru/glow-realnvp-tutorial Tensorflow 2.0 + TF Probability implementations of
 RealNVP and Glow
@@ -41,11 +43,10 @@ the paper or not covered there! For example, the affine coupling layer scaling t
 Have not read but plan to:
 - [Understanding Tensorflow Probability distribution shapes](https://github.com/tensorflow/probability/blob/r0.8/tensorflow_probability/examples/jupyter_notebooks/Understanding_TensorFlow_Distributions_Shapes.ipynb)
 
-##### RealNVP-like model
-The bijector chain is 
-`task_2_2.chains.default_chain` with `filters=256, blocks=6`. It took 7k epochs with batch size 64 and learning rates
-5e-4 (first 4.5k epochs) then 2.5e-4 (last 2.5k epochs) to train to 0.64 bits/dim.
+I've implemented 4 different models:
+- the one suggested in the assignment, except that I used actnorm instead of data-dependent convolution initialization and added batchnorm inside the simple resnet: `chains.real_nvp`
+- `chains.real_nvp` with the multiscale architecture: `chains.multiscale_real_nvp`
+- Glow: `chains.multiscale_glow`
+- `chains.real_nvp` but all splits changed to 1x1 invertible convolutions: `chains.glow_no_factoring`
 
-Some samples from this model:
-
-![Samples from homework 2, task 2](images/hw_2_2_real_nvp.gif)
+I gave all models a training time of ~4 hours, and tried to pick the parameters (number of blocks, number of steps) as large as possible so it would still fit my GPU RAM. Here is the [comparison notebook](task_2_2/compare_models.ipynb) with bits/dim plots and samples.
